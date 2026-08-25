@@ -1,0 +1,60 @@
+.dashboard-section {
+    margin: 30px 0;
+}
+
+.dashboard-section h2 {
+    color: white;
+    margin-bottom: 20px;
+}
+
+.dashboard-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 20px;
+}
+
+.dashboard-card {
+    padding: 20px;
+    border-radius: 18px;
+    color: white;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, .35);
+    transition: 0.3s;
+}
+
+.dashboard-card:hover {
+    transform: translateY(-5px);
+}
+
+.dashboard-card h4 {
+    opacity: 0.8;
+    margin-bottom: 8px;
+}
+
+.dashboard-card h1 {
+    font-size: 38px;
+    margin: 0;
+}
+
+.blue {
+    background: linear-gradient(135deg, #2563EB, #3B82F6);
+}
+
+.green {
+    background: linear-gradient(135deg, #059669, #10B981);
+}
+
+.orange {
+    background: linear-gradient(135deg, #D97706, #F59E0B);
+}
+
+.purple {
+    background: linear-gradient(135deg, #7C3AED, #9333EA);
+}
+
+.red {
+    background: linear-gradient(135deg, #DC2626, #EF4444);
+}
+
+.cyan {
+    background: linear-gradient(135deg, #0891B2, #06B6D4);
+}
