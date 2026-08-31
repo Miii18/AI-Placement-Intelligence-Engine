@@ -1,82 +1,77 @@
 from collections import Counter
 import json
-from typing import Dict, Any
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models.placement_analysis import PlacementAnalysis
 from app.models.student import Student
+from app.models.placement_analysis import PlacementAnalysis
 
-router = APIRouter(
-    prefix="/dashboard",
-    tags=["Dashboard"]
-)
+router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 
 
 @router.get("/stats")
-def get_dashboard_stats(db: Session = Depends(get_db)) -> Dict[str, Any]:
-    # 1. Total Students
-    total_students = db.query(Student).count()
+def dashboard_stats(db: Session = Depends(get_db)):
+    students = db.query(Student).all()
+    analyses = db.query(PlacementAnalysis).order_by(PlacementAnalysis.id.asc()).all()
 
-    # 2. Total Analyses
-    total_analyses = db.query(PlacementAnalysis).count()
+    total_students = len(students)
+    total_analyses = len(analyses)
 
-    # 3. Average & Highest Readiness Score
-    avg_score, max_score = db.query(
-        func.avg(PlacementAnalysis.readiness_score),
-        func.max(PlacementAnalysis.readiness_score)
-    ).filter(PlacementAnalysis.readiness_score.isnot(None)).first()
+    readiness_scores = [a.readiness_score for a in analyses if a.readiness_score]
 
-    average_readiness = round(float(avg_score)) if avg_score is not None else 0
-    highest_readiness = int(max_score) if max_score is not None else 0
+    average_readiness = (
+        round(sum(readiness_scores) / len(readiness_scores))
+        if readiness_scores else 0
+    )
 
-    # 4. Most Common Weakness
+    highest_readiness = max(readiness_scores) if readiness_scores else 0
+
+    # Count weaknesses
     weakness_counter = Counter()
-    analyses_weaknesses = db.query(PlacementAnalysis.weaknesses).filter(
-        PlacementAnalysis.weaknesses.isnot(None)
-    ).all()
 
-    for (w_text,) in analyses_weaknesses:
-        if not w_text:
-            continue
-        try:
-            items = json.loads(w_text) if isinstance(w_text, str) else w_text
-            if isinstance(items, list):
-                for item in items:
-                    if isinstance(item, str) and item.strip():
-                        weakness_counter[item.strip()] += 1
-            elif isinstance(items, str) and items.strip():
-                weakness_counter[items.strip()] += 1
-        except Exception:
-            if isinstance(w_text, str) and w_text.strip():
-                weakness_counter[w_text.strip()] += 1
+    for analysis in analyses:
+        if analysis.weaknesses:
+            try:
+                weakness_counter.update(json.loads(analysis.weaknesses))
+            except:
+                pass
 
-    most_common_weakness = (
-        weakness_counter.most_common(1)[0][0] if weakness_counter else "N/A"
-    )
-
-    # 5. Most Target Company
+    # Count target companies
     company_counter = Counter()
-    students_companies = db.query(Student.target_company).filter(
-        Student.target_company.isnot(None)
-    ).all()
 
-    for (company,) in students_companies:
-        if company and company.strip():
-            company_counter[company.strip()] += 1
-
-    most_target_company = (
-        company_counter.most_common(1)[0][0] if company_counter else "N/A"
-    )
+    for student in students:
+        if student.target_company:
+            company_counter.update([student.target_company])
 
     return {
         "total_students": total_students,
         "total_analyses": total_analyses,
         "average_readiness": average_readiness,
         "highest_readiness": highest_readiness,
-        "most_common_weakness": most_common_weakness,
-        "most_target_company": most_target_company
+        "most_common_weakness": weakness_counter.most_common(1)[0][0] if weakness_counter else "N/A",
+        "most_target_company": company_counter.most_common(1)[0][0] if company_counter else "N/A",
+
+        # Data for Bar Chart
+        "weakness_chart": [
+            {"name": k, "count": v}
+            for k, v in weakness_counter.items()
+        ],
+
+        # Data for Line Chart
+        "readiness_chart": [
+            {
+                "analysis": f"A{i+1}",
+                "score": a.readiness_score,
+            }
+            for i, a in enumerate(analyses)
+            if a.readiness_score
+        ],
+
+        # Data for Pie Chart
+        "company_chart": [
+            {"name": k, "value": v}
+            for k, v in company_counter.items()
+        ],
     }

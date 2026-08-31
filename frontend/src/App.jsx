@@ -2,6 +2,8 @@ import Charts from "./components/Charts";
 import Dashboard from "./components/Dashboard";
 import { useState } from "react";
 import axios from "axios";
+import jsPDF from "jspdf";
+import html2canvas from "html2canvas";
 import "./App.css";
 
 function App() {
@@ -191,6 +193,57 @@ function App() {
     }
   };
 
+  // ===============================
+  // DOWNLOAD AI REPORT AS PDF
+  // ===============================
+  const downloadPDF = async () => {
+    const report = document.getElementById("placement-report");
+
+    if (!report) {
+      alert("No placement report found. Please analyze first.");
+      return;
+    }
+
+    try {
+      const canvas = await html2canvas(report, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: "#081229",
+      });
+
+      const imgData = canvas.toDataURL("image/png");
+
+      const pdf = new jsPDF("p", "mm", "a4");
+
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+
+      const imgWidth = pageWidth;
+      const imgHeight = (canvas.height * imgWidth) / canvas.width;
+
+      let heightLeft = imgHeight;
+      let position = 25;
+
+      pdf.setFontSize(18);
+      pdf.text("AI Placement Intelligence Report", 15, 15);
+
+      pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
+
+      heightLeft -= pageHeight - position;
+
+      while (heightLeft > 0) {
+        position = heightLeft - imgHeight + 10;
+        pdf.addPage();
+        pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
+        heightLeft -= pageHeight;
+      }
+
+      pdf.save("AI_Placement_Report.pdf");
+    } catch (error) {
+      console.error("PDF Error:", error);
+      alert("Failed to generate PDF.");
+    }
+  };
   // --------------------------------------------------
   // LOAD SAVED STUDENT HISTORY (Latest Analysis)
   // --------------------------------------------------
@@ -553,88 +606,90 @@ function App() {
         <div className="results">
           <Charts result={result} />
           {/* ANALYSIS METADATA HEADER */}
-          <div className="card report-meta-card">
-            <h3 className="meta-card-title">📋 Placement Intelligence Report</h3>
-            <div className="meta-info-grid">
-              <div className="meta-item">
-                <span className="meta-label">🆔 Student ID</span>
-                <span className="meta-value">#{result.student_id || studentId || "N/A"}</span>
-              </div>
-              <div className="meta-item">
-                <span className="meta-label">📊 Analysis ID</span>
-                <span className="meta-value">#{result.id || selectedAnalysisId || "N/A"}</span>
-              </div>
-              <div className="meta-item">
-                <span className="meta-label">📅 Date & Time</span>
-                <span className="meta-value">
-                  {formatDate(result.created_at) || "Recent"}
-                </span>
+          <div id="placement-report">
+            <div className="card report-meta-card">
+              <h3 className="meta-card-title">📋 Placement Intelligence Report</h3>
+              <div className="meta-info-grid">
+                <div className="meta-item">
+                  <span className="meta-label">🆔 Student ID</span>
+                  <span className="meta-value">#{result.student_id || studentId || "N/A"}</span>
+                </div>
+                <div className="meta-item">
+                  <span className="meta-label">📊 Analysis ID</span>
+                  <span className="meta-value">#{result.id || selectedAnalysisId || "N/A"}</span>
+                </div>
+                <div className="meta-item">
+                  <span className="meta-label">📅 Date & Time</span>
+                  <span className="meta-value">
+                    {formatDate(result.created_at) || "Recent"}
+                  </span>
+                </div>
               </div>
             </div>
-          </div>
 
-          {/* Strengths */}
+            {/* Strengths */}
 
-          <div className="card">
-            <h2>💪 Strengths</h2>
+            <div className="card">
+              <h2>💪 Strengths</h2>
 
-            <ul>
-              {result.strengths?.map((s, i) => (
-                <li key={i}>{s}</li>
+              <ul>
+                {result.strengths?.map((s, i) => (
+                  <li key={i}>{s}</li>
+                ))}
+              </ul>
+            </div>
+
+            {/* Weaknesses */}
+            <div className="card">
+              <h2>⚠️ Weaknesses</h2>
+
+              <ul>
+                {result.weaknesses?.map((w, i) => (
+                  <li key={i}>{w}</li>
+                ))}
+              </ul>
+            </div>
+
+            {/* Priorities */}
+
+            <div className="card">
+              <h2>🎯 Priorities</h2>
+
+              {result.priorities?.map((p, i) => (
+                <div key={i} className="priority">
+                  <strong>{p.skill}</strong>
+
+                  <p>{p.reason}</p>
+                </div>
               ))}
-            </ul>
-          </div>
+            </div>
 
-          {/* Weaknesses */}
+            {/* Roadmap */}
 
-          <div className="card">
-            <h2>⚠️ Weaknesses</h2>
+            <div className="card">
+              <h2>📅 Roadmap</h2>
 
-            <ul>
-              {result.weaknesses?.map((w, i) => (
-                <li key={i}>{w}</li>
+              {result.roadmap?.map((r, i) => (
+                <div key={i} className="roadmap-item">
+                  <strong>Week {r.week}</strong>
+
+                  <p>{r.focus}</p>
+                </div>
               ))}
-            </ul>
-          </div>
+            </div>
 
-          {/* Priorities */}
+            {/* Today's Tasks */}
 
-          <div className="card">
-            <h2>🎯 Priorities</h2>
+            <div className="card">
+              <h2>✅ Today's Tasks</h2>
 
-            {result.priorities?.map((p, i) => (
-              <div key={i} className="priority">
-                <strong>{p.skill}</strong>
+              <ul>
+                {result.today_tasks?.map((t, i) => (
+                  <li key={i}>{t}</li>
+                ))}
+              </ul>
+            </div>
 
-                <p>{p.reason}</p>
-              </div>
-            ))}
-          </div>
-
-          {/* Roadmap */}
-
-          <div className="card">
-            <h2>📅 Roadmap</h2>
-
-            {result.roadmap?.map((r, i) => (
-              <div key={i} className="roadmap-item">
-                <strong>Week {r.week}</strong>
-
-                <p>{r.focus}</p>
-              </div>
-            ))}
-          </div>
-
-          {/* Today's Tasks */}
-
-          <div className="card">
-            <h2>✅ Today's Tasks</h2>
-
-            <ul>
-              {result.today_tasks?.map((t, i) => (
-                <li key={i}>{t}</li>
-              ))}
-            </ul>
           </div>
 
           {/* Readiness Score */}
@@ -646,6 +701,9 @@ function App() {
 
             <p>{result.readiness_reason}</p>
           </div>
+          <button onClick={downloadPDF} className="download-btn">
+            📄 Download PDF Report
+          </button>
         </div>
       )}
     </div>
