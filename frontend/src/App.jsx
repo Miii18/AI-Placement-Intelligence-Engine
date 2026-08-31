@@ -6,6 +6,8 @@ import jsPDF from "jspdf";
 import html2canvas from "html2canvas";
 import "./App.css";
 
+// UI updated: Dashboard and PDF report improvements (July 2026)
+
 function App() {
   const [form, setForm] = useState({
     name: "Meet",
