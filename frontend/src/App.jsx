@@ -708,6 +708,10 @@ function App() {
           </button>
         </div>
       )}
+      <footer className="app-footer">
+        <p>🚀 AI Placement Intelligence Engine • Version 1.2 MVP</p>
+        <p>Built with React, FastAPI, PostgreSQL & Gemini AI</p>
+      </footer>
     </div>
   );
 }

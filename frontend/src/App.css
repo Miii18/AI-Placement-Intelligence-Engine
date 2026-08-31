@@ -392,3 +392,17 @@ button:disabled {
 .full-width {
   grid-column: 1/-1;
 }
+
+
+.app-footer {
+  margin-top: 40px;
+  padding: 20px;
+  text-align: center;
+  color: #94a3b8;
+  font-size: 14px;
+  border-top: 1px solid #1e293b;
+}
+
+.app-footer p {
+  margin: 4px 0;
+}
