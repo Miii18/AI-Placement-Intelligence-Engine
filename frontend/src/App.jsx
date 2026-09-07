@@ -8,6 +8,9 @@ import "./App.css";
 
 // UI updated: Dashboard and PDF report improvements (July 2026)
 
+// API Base URL for FastAPI backend (dynamically uses current hostname)
+const API_BASE_URL = `http://${window.location.hostname || "127.0.0.1"}:8000`;
+
 function App() {
   const [form, setForm] = useState({
     name: "Meet",
@@ -119,7 +122,7 @@ function App() {
       // ------------------------------------------------
 
       const studentResponse = await axios.post(
-        "http://127.0.0.1:8000/students",
+        `${API_BASE_URL}/students`,
         {
           name: form.name,
           target_role: form.target_role,
@@ -141,7 +144,7 @@ function App() {
       // ------------------------------------------------
 
       const analysisResponse = await axios.post(
-        "http://127.0.0.1:8000/analyze",
+        `${API_BASE_URL}/analyze`,
         {
           student_id: newStudentId,
           target_role: form.target_role,
@@ -178,17 +181,29 @@ function App() {
         fetchAnalysisHistoryWithId(newStudentId);
       }
     } catch (error) {
-      console.error("Error:", error);
+      console.error("Error during analysis:", error);
 
       if (error.response) {
-        console.error("Backend response:", error.response.data);
+        console.error("Backend response status:", error.response.status);
+        console.error("Backend response error data:", error.response.data);
+
+        const errorDetail = error.response.data?.detail
+          ? typeof error.response.data.detail === "object"
+            ? JSON.stringify(error.response.data.detail)
+            : error.response.data.detail
+          : JSON.stringify(error.response.data) || error.message;
+
         alert(
-          `Request failed (${error.response.status}). Check the browser console and backend terminal.`
+          `Request failed (${error.response.status}): ${errorDetail}. Check the browser console and backend terminal.`
+        );
+      } else if (error.request) {
+        console.error("Network Error - No response received from backend:", error.request);
+        alert(
+          `Cannot connect to the backend server at ${API_BASE_URL}. Make sure FastAPI is running on port 8000.`
         );
       } else {
-        alert(
-          "Cannot connect to the backend. Make sure FastAPI is running on port 8000."
-        );
+        console.error("Request configuration error:", error.message);
+        alert(`Error: ${error.message}`);
       }
     } finally {
       setLoading(false);
@@ -207,40 +222,134 @@ function App() {
     }
 
     try {
+      const currentScrollY = window.scrollY;
+      window.scrollTo(0, 0);
+
       const canvas = await html2canvas(report, {
         scale: 2,
         useCORS: true,
-        backgroundColor: "#081229",
+        backgroundColor: "#0B1120",
+        scrollX: 0,
+        scrollY: 0,
+        logging: false,
       });
 
-      const imgData = canvas.toDataURL("image/png");
+      window.scrollTo(0, currentScrollY);
 
       const pdf = new jsPDF("p", "mm", "a4");
+      const pageWidth = pdf.internal.pageSize.getWidth(); // 210mm
+      const pageHeight = pdf.internal.pageSize.getHeight(); // 297mm
 
-      const pageWidth = pdf.internal.pageSize.getWidth();
-      const pageHeight = pdf.internal.pageSize.getHeight();
+      const marginX = 10; // 10mm left & right margins
+      const marginTop = 10; // 10mm top margin
+      const marginBottom = 10; // 10mm bottom margin
 
-      const imgWidth = pageWidth;
-      const imgHeight = (canvas.height * imgWidth) / canvas.width;
+      const imgWidth = pageWidth - marginX * 2; // 190mm
+      const maxPageHeight = pageHeight - marginTop - marginBottom; // 277mm
 
-      let heightLeft = imgHeight;
-      let position = 25;
+      const reportWidthPX = report.offsetWidth || canvas.width / 2;
+      const pxToMM = imgWidth / reportWidthPX;
+      const totalReportHeightMM = (canvas.height * imgWidth) / canvas.width;
 
-      pdf.setFontSize(18);
-      pdf.text("AI Placement Intelligence Report", 15, 15);
+      // Collect card boundaries to avoid breaking inside cards across page breaks
+      const reportRect = report.getBoundingClientRect();
+      const cardElements = Array.from(
+        report.querySelectorAll(
+          ".card, .chart-card, .insights-panel, .recommendation-card, .roadmap-item, .priority, .report-meta-card, .insight-card"
+        )
+      );
 
-      pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
+      const elementBoundaries = cardElements.map((el) => {
+        const rect = el.getBoundingClientRect();
+        const topMM = (rect.top - reportRect.top) * pxToMM;
+        const bottomMM = (rect.bottom - reportRect.top) * pxToMM;
+        const heightMM = bottomMM - topMM;
+        return { topMM, bottomMM, heightMM };
+      });
 
-      heightLeft -= pageHeight - position;
+      let currentYMM = 0;
+      let pageCount = 0;
 
-      while (heightLeft > 0) {
-        position = heightLeft - imgHeight + 10;
-        pdf.addPage();
-        pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
-        heightLeft -= pageHeight;
+      while (currentYMM < totalReportHeightMM - 1) {
+        if (pageCount > 0) {
+          pdf.addPage();
+        }
+
+        let targetNextYMM = currentYMM + maxPageHeight;
+
+        if (targetNextYMM < totalReportHeightMM) {
+          // Adjust page break line if it intersects a card element
+          for (const b of elementBoundaries) {
+            if (
+              b.topMM > currentYMM + 5 &&
+              b.topMM < targetNextYMM &&
+              b.bottomMM > targetNextYMM &&
+              b.heightMM <= maxPageHeight
+            ) {
+              targetNextYMM = b.topMM;
+              break;
+            }
+          }
+        }
+
+        const sliceHeightMM = Math.min(
+          targetNextYMM - currentYMM,
+          totalReportHeightMM - currentYMM
+        );
+
+        const startYPX = (currentYMM / totalReportHeightMM) * canvas.height;
+        const sliceHeightPX = (sliceHeightMM / totalReportHeightMM) * canvas.height;
+
+        const tempCanvas = document.createElement("canvas");
+        tempCanvas.width = canvas.width;
+        tempCanvas.height = Math.max(1, Math.round(sliceHeightPX));
+        const ctx = tempCanvas.getContext("2d");
+
+        ctx.fillStyle = "#0B1120";
+        ctx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+
+        ctx.drawImage(
+          canvas,
+          0,
+          startYPX,
+          canvas.width,
+          sliceHeightPX,
+          0,
+          0,
+          tempCanvas.width,
+          tempCanvas.height
+        );
+
+        const pageImgData = tempCanvas.toDataURL("image/png");
+        pdf.addImage(
+          pageImgData,
+          "PNG",
+          marginX,
+          marginTop,
+          imgWidth,
+          sliceHeightMM
+        );
+
+        currentYMM = targetNextYMM;
+        pageCount++;
       }
 
-      pdf.save("AI_Placement_Report.pdf");
+      // PDF name = Candidate Name entered in form
+      const rawName =
+        form?.name ||
+        result?.student_name ||
+        result?.name ||
+        "Candidate";
+
+      const candidateName =
+        rawName
+          .trim()
+          .replace(/[/\\?%*:|"<>]/g, "")
+          .replace(/\s+/g, "_") || "Candidate";
+
+      const fileName = `${candidateName}_AI_Placement_Report.pdf`;
+
+      pdf.save(fileName);
     } catch (error) {
       console.error("PDF Error:", error);
       alert("Failed to generate PDF.");
@@ -262,7 +371,7 @@ function App() {
       console.log("Loading history for student:", studentId);
 
       const response = await axios.get(
-        `http://127.0.0.1:8000/students/${studentId}`
+        `${API_BASE_URL}/students/${studentId}`
       );
 
       console.log("Saved student data:", response.data);
@@ -324,15 +433,30 @@ function App() {
       console.error("History error:", error);
 
       if (error.response) {
-        console.error("Backend response:", error.response.data);
+        console.error("Backend response status:", error.response.status);
+        console.error("Backend response error data:", error.response.data);
+
+        const errorDetail = error.response.data?.detail
+          ? typeof error.response.data.detail === "object"
+            ? JSON.stringify(error.response.data.detail)
+            : error.response.data.detail
+          : `Status ${error.response.status}`;
+
         setBanner({
           type: "error",
-          text: `Could not load saved analysis (${error.response.status}).`,
+          text: `Could not load saved analysis (${error.response.status}): ${errorDetail}`,
+        });
+      } else if (error.request) {
+        console.error("Network Error - No response received from backend:", error.request);
+        setBanner({
+          type: "error",
+          text: `Cannot connect to backend server at ${API_BASE_URL}.`,
         });
       } else {
+        console.error("Request configuration error:", error.message);
         setBanner({
           type: "error",
-          text: "Cannot connect to the backend server.",
+          text: `Error: ${error.message}`,
         });
       }
     } finally {
@@ -358,7 +482,7 @@ function App() {
       console.log("Fetching all analyses for student:", targetStudentId);
 
       const response = await axios.get(
-        `http://127.0.0.1:8000/students/${targetStudentId}/analyses`
+        `${API_BASE_URL}/students/${targetStudentId}/analyses`
       );
 
       console.log("Analysis history list:", response.data);
@@ -369,17 +493,27 @@ function App() {
       console.error("Error fetching analysis history:", error);
 
       if (error.response) {
+        console.error("Backend response status:", error.response.status);
+        console.error("Backend response error data:", error.response.data);
+
         if (error.response.status === 404) {
           setFetchHistoryError("Student not found on server.");
         } else {
-          setFetchHistoryError(
-            `Failed to load history (${error.response.status}).`
-          );
+          const detailMsg = error.response.data?.detail
+            ? typeof error.response.data.detail === "object"
+              ? JSON.stringify(error.response.data.detail)
+              : error.response.data.detail
+            : `Status ${error.response.status}`;
+          setFetchHistoryError(`Failed to load history (${detailMsg}).`);
         }
-      } else {
+      } else if (error.request) {
+        console.error("Network Error - No response received from backend:", error.request);
         setFetchHistoryError(
-          "Cannot connect to the backend. Make sure FastAPI is running on port 8000."
+          `Cannot connect to backend at ${API_BASE_URL}. Make sure FastAPI is running on port 8000.`
         );
+      } else {
+        console.error("Request configuration error:", error.message);
+        setFetchHistoryError(`Error: ${error.message}`);
       }
     } finally {
       setHistoryLoading(false);
@@ -606,9 +740,10 @@ function App() {
 
       {result && (
         <div className="results">
-          <Charts result={result} />
-          {/* ANALYSIS METADATA HEADER */}
+          {/* COMPLETE REPORT CONTAINER FOR PDF CAPTURE */}
           <div id="placement-report">
+            <Charts result={result} />
+            {/* ANALYSIS METADATA HEADER */}
             <div className="card report-meta-card">
               <h3 className="meta-card-title">📋 Placement Intelligence Report</h3>
               <div className="meta-info-grid">
@@ -628,32 +763,46 @@ function App() {
                 </div>
               </div>
             </div>
+            {/* Readiness Score */}
+            <div className="card readiness readiness-card-large">
+              <h2>📊 Readiness Score</h2>
+
+              <div className="score-container">
+                <div className="score">{result.readiness_score}%</div>
+              </div>
+
+              <p className="readiness-reason">{result.readiness_reason}</p>
+            </div>
 
             {/* Strengths */}
-
-            <div className="card">
+            <div className="card strengths-card">
               <h2>💪 Strengths</h2>
 
-              <ul>
+              <div className="chips-grid">
                 {result.strengths?.map((s, i) => (
-                  <li key={i}>{s}</li>
+                  <div key={i} className="strength-chip">
+                    <span className="chip-icon">✔</span>
+                    <span className="chip-text">{s}</span>
+                  </div>
                 ))}
-              </ul>
+              </div>
             </div>
 
             {/* Weaknesses */}
-            <div className="card">
+            <div className="card weaknesses-card">
               <h2>⚠️ Weaknesses</h2>
 
-              <ul>
+              <div className="chips-grid">
                 {result.weaknesses?.map((w, i) => (
-                  <li key={i}>{w}</li>
+                  <div key={i} className="weakness-chip">
+                    <span className="chip-icon">⚡</span>
+                    <span className="chip-text">{w}</span>
+                  </div>
                 ))}
-              </ul>
+              </div>
             </div>
 
             {/* Priorities */}
-
             <div className="card">
               <h2>🎯 Priorities</h2>
 
@@ -667,51 +816,183 @@ function App() {
             </div>
 
             {/* Roadmap */}
-
-            <div className="card">
+            <div className="card roadmap-section-card">
               <h2>📅 Roadmap</h2>
 
-              {result.roadmap?.map((r, i) => (
-                <div key={i} className="roadmap-item">
-                  <strong>Week {r.week}</strong>
+              <div className="roadmap-grid">
+                {result.roadmap?.map((r, i) => (
+                  <div key={i} className="roadmap-item">
+                    <div className="roadmap-header">
+                      <span className="week-pill">Week {r.week}</span>
+                    </div>
 
-                  <p>{r.focus}</p>
+                    <p className="roadmap-focus">{r.focus}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* AI Placement Insights Panel */}
+            <div className="card insights-panel">
+              <h2>💡 AI Placement Insights</h2>
+
+              <div className="insights-grid">
+                {/* 1. Suitable Roles */}
+                <div className="insight-card">
+                  <h3>🎯 Suitable Roles</h3>
+                  <div className="badge-group">
+                    {(
+                      result.suitable_roles || [
+                        form.target_role || "AI/ML Developer",
+                        "Software Engineer",
+                        "Data Scientist",
+                      ]
+                    ).map((role, i) => (
+                      <span key={i} className="insight-badge role-badge">
+                        {role}
+                      </span>
+                    ))}
+                  </div>
                 </div>
-              ))}
+
+                {/* 2. Recommended Companies */}
+                <div className="insight-card">
+                  <h3>🏢 Recommended Companies</h3>
+                  <div className="badge-group">
+                    {(
+                      result.recommended_companies || [
+                        form.target_company || "Shiprocket",
+                        "Google",
+                        "Amazon",
+                        "Microsoft",
+                      ]
+                    ).map((company, i) => (
+                      <span key={i} className="insight-badge company-badge">
+                        {company}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                {/* 3. Placement Probability */}
+                <div className="insight-card probability-card">
+                  <h3>📈 Placement Probability</h3>
+                  <div className="probability-display">
+                    <div className="probability-circle-container">
+                      <svg width="110" height="110" viewBox="0 0 120 120">
+                        <circle
+                          cx="60"
+                          cy="60"
+                          r="50"
+                          fill="none"
+                          stroke="#334155"
+                          strokeWidth="10"
+                        />
+                        <circle
+                          cx="60"
+                          cy="60"
+                          r="50"
+                          fill="none"
+                          stroke="#10b981"
+                          strokeWidth="10"
+                          strokeDasharray={314}
+                          strokeDashoffset={
+                            314 -
+                            (314 *
+                              Math.min(
+                                Math.max(
+                                  result.placement_probability ??
+                                    result.readiness_score ??
+                                    75,
+                                  0
+                                ),
+                                100
+                              )) /
+                              100
+                          }
+                          strokeLinecap="round"
+                          transform="rotate(-90 60 60)"
+                          style={{ transition: "stroke-dashoffset 0.5s ease" }}
+                        />
+                        <text
+                          x="60"
+                          y="66"
+                          textAnchor="middle"
+                          fill="#ffffff"
+                          fontSize="24"
+                          fontWeight="bold"
+                        >
+                          {result.placement_probability ??
+                            result.readiness_score ??
+                            75}%
+                        </text>
+                      </svg>
+                    </div>
+                    <span className="probability-text">Match Confidence</span>
+                  </div>
+                </div>
+
+                {/* 4. Priority Skills */}
+                <div className="insight-card">
+                  <h3>⚡ Priority Skills</h3>
+                  <div className="chip-group">
+                    {(
+                      result.priority_skills ||
+                      (result.priorities?.map((p) => p.skill) ?? [
+                        "System Design",
+                        "Data Structures",
+                      ])
+                    ).map((skill, i) => (
+                      <span key={i} className="insight-chip">
+                        {skill}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                {/* 5. AI Recommendation */}
+                <div className="insight-card recommendation-card full-width-insight">
+                  <h3>🤖 AI Recommendation</h3>
+                  <p className="recommendation-text">
+                    {result.ai_recommendation ||
+                      "Focus on building core technical projects and mastering interview problem solving to increase your placement offer rate."}
+                  </p>
+                </div>
+              </div>
             </div>
 
             {/* Today's Tasks */}
-
-            <div className="card">
+            <div className="card tasks-card">
               <h2>✅ Today's Tasks</h2>
 
-              <ul>
+              <div className="tasks-grid">
                 {result.today_tasks?.map((t, i) => (
-                  <li key={i}>{t}</li>
+                  <label key={i} className="task-card-item">
+                    <input type="checkbox" className="task-checkbox" />
+                    <span className="task-custom-check"></span>
+                    <span className="task-text-content">{t}</span>
+                  </label>
                 ))}
-              </ul>
+              </div>
             </div>
 
+            <footer className="app-footer">
+              <p>🚀 AI Placement Intelligence Engine • Version 1.2 MVP</p>
+              <p>Built with React, FastAPI, PostgreSQL & Gemini AI</p>
+            </footer>
           </div>
 
-          {/* Readiness Score */}
-
-          <div className="card readiness">
-            <h2>📊 Readiness Score</h2>
-
-            <div className="score">{result.readiness_score}%</div>
-
-            <p>{result.readiness_reason}</p>
-          </div>
           <button onClick={downloadPDF} className="download-btn">
             📄 Download PDF Report
           </button>
         </div>
       )}
-      <footer className="app-footer">
-        <p>🚀 AI Placement Intelligence Engine • Version 1.2 MVP</p>
-        <p>Built with React, FastAPI, PostgreSQL & Gemini AI</p>
-      </footer>
+      {!result && (
+        <footer className="app-footer">
+          <p>🚀 AI Placement Intelligence Engine • Version 1.2 MVP</p>
+          <p>Built with React, FastAPI, PostgreSQL & Gemini AI</p>
+        </footer>
+      )}
     </div>
   );
 }
